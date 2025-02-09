@@ -17,6 +17,7 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import f1_score
 
+#1.3  Fixed Part
 splits = [0.7, 0.1, 0.2]
 print('Randomly Split the real dataset into train, validation and test sets: %s'%str(splits))
 
@@ -45,9 +46,12 @@ def set_random_seed(seed):
 seed_value = 2025
 set_random_seed(seed_value)
 
+"""
+1.4 Create Folders
+"""
 realpath = r'/data/real'
 virtpath = r'/data/virtual'
-rootdir = r'/Virtual_Data_Generation/'  # replace with your project path
+rootdir = r'/root/Virtual_Data_Generation'  # replace with your project path
 real_directory = rootdir + realpath
 virt_directory = rootdir + virtpath
 
@@ -59,6 +63,9 @@ print(f"Directory '{realpath}' created successfully.")
 os.makedirs(virt_directory, exist_ok=True)
 print(f"Directory '{virtpath}' created successfully.")
 
+"""
+1.5 Download data from Zenodo
+"""
 # Construct the URL to the Zenodo API
 api_url = f"https://zenodo.org/records/11059235"
 
@@ -83,6 +90,9 @@ with open(file_path, 'wb') as f:
 
 print(f"Downloaded to {file_path}")
 
+"""
+1.6 Unzip OpenPack dataset
+"""
 # Iterate over all files in the directory
 for filename in os.listdir(real_directory):
     # Construct full file path
