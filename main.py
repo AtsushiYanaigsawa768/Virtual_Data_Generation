@@ -17,6 +17,9 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import f1_score
 from evaluation import HAR_evaluation
+from delete import delete_csv_files
+from StableDiffusion import StableDiffusionModel
+from volumeChecker import check_virtual_volume
 """
 Variable Part/Preparation
 """
@@ -130,7 +133,7 @@ def switch_axis(sample, choice):
     return sample
 
 
-def flip(sample, choice):
+def flip(sample):
     """
     Flip over the actigram on the temporal scale
 
@@ -138,9 +141,7 @@ def flip(sample, choice):
         sample (numpy array): 3 * FEATURE_SIZE
         choice (int): 0-1 binary
     """
-    if choice == 1:
-        sample = np.flip(sample, 1)
-    return sample
+    return np.flip(sample, 1)
 
 
 def DA_Permutation(X, nPerm=4, minSegLength=10):
@@ -165,7 +166,7 @@ def DA_Permutation(X, nPerm=4, minSegLength=10):
     return X_new
 
 
-def permute(sample, choice, nPerm=4, minSegLength=10):
+def permute(sample, nPerm=4, minSegLength=10):
     """
     Distort an epoch by dividing up the sample into several segments and
     then permute them
@@ -174,10 +175,9 @@ def permute(sample, choice, nPerm=4, minSegLength=10):
         sample (numpy array): 3 * FEATURE_SIZE
         choice (int): 0-1 binary
     """
-    if choice == 1:
-        sample = np.swapaxes(sample, 0, 1)
-        sample = DA_Permutation(sample, nPerm=nPerm, minSegLength=minSegLength)
-        sample = np.swapaxes(sample, 0, 1)
+    sample = np.swapaxes(sample, 0, 1)
+    sample = DA_Permutation(sample, nPerm=nPerm, minSegLength=minSegLength)
+    sample = np.swapaxes(sample, 0, 1)
     return sample
 
 
@@ -222,13 +222,12 @@ def scaling_uniform(X, scale_range=0.15, min_scale_diff=0.02):
     return X
 
 
-def scale(sample, choice, scale_range=0.5, min_scale_diff=0.15):
-    if choice == 1:
-        sample = np.swapaxes(sample, 0, 1)
-        sample = scaling_uniform(
-            sample, scale_range=scale_range, min_scale_diff=min_scale_diff
-        )
-        sample = np.swapaxes(sample, 0, 1)
+def scale(sample, scale_range=0.5, min_scale_diff=0.15):
+    sample = np.swapaxes(sample, 0, 1)
+    sample = scaling_uniform(
+        sample, scale_range=scale_range, min_scale_diff=min_scale_diff
+    )
+    sample = np.swapaxes(sample, 0, 1)
     return sample
 
 
@@ -272,11 +271,10 @@ def DA_TimeWarp(X, sigma=0.2):
     return X_new
 
 
-def time_warp(sample, choice, sigma=0.2):
-    if choice == 1:
-        sample = np.swapaxes(sample, 0, 1)
-        sample = DA_TimeWarp(sample, sigma=sigma)
-        sample = np.swapaxes(sample, 0, 1)
+def time_warp(sample,  sigma=0.2):
+    sample = np.swapaxes(sample, 0, 1)
+    sample = DA_TimeWarp(sample, sigma=sigma)
+    sample = np.swapaxes(sample, 0, 1)
     return sample
 
 def jitter(sample, sigma=0.03):
@@ -365,66 +363,276 @@ def magnitude_warp(sample, sigma=0.2, knot=4):
 """
 2.8 Implement data augmentation with training data and save them to folder
 """
-def custom_virtual_data_generation_algorithm(data):
-    '''
-    Please modify the code and submit this function and its relative functions.
-    :param data: numpy array, shape is (data length, dim=6)
-    :return: numpy array, shape is (data length, dim=6)
-    '''
-    # Data augmentations
-    # Choose random axis switch directions for left and right channels
-    i = 0
-    j = 0
-    augmented_list = []
-    for _ in range(4):
-        # Process left channel: axis switching, jitter, and magnitude warping
-        left_aug = switch_axis(data[:, :3].transpose(), i)
-        # Process right channel: axis switching, jitter, and magnitude warping
-        right_aug = switch_axis(data[:, 3:].transpose(), j)
-        # Concatenate the two channels (after transposing back)
-        combined = np.concatenate([left_aug.transpose(), right_aug.transpose()], axis=1)
-        augmented_list.append(combined)
-    # Concatenate all 4 augmented samples vertically
-    new_data = np.concatenate(augmented_list, axis=0)
-    return new_data
-
-def save_virtual_data(data, filename):
-  '''
-  Participants can use this function to save csv data to /data/virtual/
-  :param data: dataframe type, shape is (data length, dim=7), columns = new_columns = selected_columns[:6] + [selected_columns[-1]]
-  :return:
-  '''
-
-  data.to_csv(os.path.join(virt_directory, filename+'.csv'), index=False)
-  return
-def custom_virtual_data_generation(train_data_dict):
+def custom_virtual_data_generation(train_data_dict,i,j):
     '''
     This function aims to generate virtual and from train_data_dict, and save the data to virt_directory.
     Participants could not change the input and output of this function.
     Participants could modify the code inside this function.
     During the code submission, participants need to submit this function and its relavant functions, such as custom_virtual_data_generation_algorithm.
     '''
+    def custom_virtual_data_generation_algorithm(data, u, labels, counter):
+        '''
+        Generate one augmented sample and save it directly to CSV
+        :param data: numpy array, shape is (data length, dim=6)
+        :param u: user ID string
+        :param labels: labels array
+        :param counter: counter for file naming
+        '''
+        # Process left channel: axis switching
+        left_aug = switch_axis(data[:, :3].transpose(), i)
+        # Process right channel: axis switching
+        right_aug = switch_axis(data[:, 3:].transpose(), j)
+        # Concatenate the two channels (after transposing back)
+        combined = np.concatenate([left_aug.transpose(), right_aug.transpose()], axis=1)
+        
+        # Combine with labels
+        virtual_data = np.concatenate([combined, labels], axis=1)
+        
+        # Convert to dataframe
+        df = pd.DataFrame(virtual_data, columns=new_columns)
+        
+        # Save to CSV with unique name
+        filename = f"{u}_aug_{counter}"
+        save_virtual_data(df, filename)
+        
+        return combined
+
+    def save_virtual_data(data, filename):
+        '''
+        Save CSV data to /data/virtual/
+        :param data: dataframe type
+        :param filename: name of the file without extension
+        '''
+        data.to_csv(os.path.join(virt_directory, filename + '.csv'), index=False)
+    number = 0
     for u, df in train_data_dict.items():
-        print('Generating virtual data from user %s.'% u)
+        number += 1
+        print('Generating virtual data from user %s.' % u)
         # Extract sensor data and labels
         raw_data = df[selected_columns[:6]].values
         labels = df[selected_columns[-1]].values.reshape(-1,1)
+        volume_checker = True
+        aug_count = 0
+        while volume_checker:
+            custom_virtual_data_generation_algorithm(raw_data, u, labels, aug_count)
+            aug_count += 1
+            volume_checker = check_virtual_volume(rootdir, virtpath, limit_mb=500*number/len(train_data_dict))
 
-        tmp = custom_virtual_data_generation_algorithm(raw_data)
-
-        # Repeat labels for each augmented sample to match the augmented data size
-        labels_aug = np.tile(labels, (4, 1))
-        # Concatenate data with operation labels
-        virtual_data = np.concatenate([tmp, labels_aug], axis=1)
-
-        # Convert np.array to dataframe
-        df = pd.DataFrame(virtual_data, columns=new_columns)
-
-        # Save data to /data/virtual/
-        save_virtual_data(df, u)
-        # df.to_csv(os.path.join(virt_directory, u+'.csv'), index=False)
     print('Virtual data generation is done.')
 
-custom_virtual_data_generation(train_data_dict)
+def function1():
+    # Create or load results CSV file
+    results_file = 'augmentation_results.csv'
+    if not os.path.exists(results_file):
+        results_df = pd.DataFrame(columns=['method', 'f1_score'])
+    else:
+        results_df = pd.read_csv(results_file)
+    
+    for i in range(7):
+        for j in range(7):
+            delete_csv_files(virt_directory)
+            custom_virtual_data_generation(train_data_dict,i,j)
+            print('Virtual data generation is done.')
+            f1score = HAR_evaluation(f"switch_axis_right_{i}_left_{j}")
+            print(f"switch_axis_right_{i}_left_{j} f1 score: {f1score}")
+            
+            # Record results
+            new_row = pd.DataFrame({
+                'method': [f"switch_axis_right_{i}_left_{j}"],
+                'f1_score': [f1score]
+            })
+            results_df = pd.concat([results_df, new_row], ignore_index=True)
+            
+            # Save results after each iteration
+            results_df.to_csv(results_file, index=False)
 
-HAR_evaluation("original_10")
+def trial_randam_int(train_data_dict):
+    '''
+    This function aims to generate virtual data from train_data_dict with random axis switching,
+    and save the data to virt_directory.
+    '''
+    def custom_virtual_data_generation_algorithm(data, u, labels, counter):
+        '''
+        Generate one augmented sample and save it directly to CSV
+        :param data: numpy array, shape is (data length, dim=6)
+        :param u: user ID string
+        :param labels: labels array
+        :param counter: counter for file naming
+        '''
+        i = random.randint(0, 6)
+        j = random.randint(0, 6)
+        # Process left channel: axis switching
+        left_aug = switch_axis(data[:, :3].transpose(), i)
+        # Process right channel: axis switching
+        right_aug = switch_axis(data[:, 3:].transpose(), j)
+        # Concatenate the two channels (after transposing back)
+        combined = np.concatenate([left_aug.transpose(), right_aug.transpose()], axis=1)
+        
+        # Combine with labels
+        virtual_data = np.concatenate([combined, labels], axis=1)
+        
+        # Convert to dataframe
+        df = pd.DataFrame(virtual_data, columns=new_columns)
+        
+        # Save to CSV with unique name
+        filename = f"{u}_aug_{counter}"
+        save_virtual_data(df, filename)
+        
+        return combined
+
+    def save_virtual_data(data, filename):
+        '''
+        Save CSV data to /data/virtual/
+        :param data: dataframe type
+        :param filename: name of the file without extension
+        '''
+        data.to_csv(os.path.join(virt_directory, filename + '.csv'), index=False)
+
+    number = 0
+    for u, df in train_data_dict.items():
+        number += 1
+        print('Generating virtual data from user %s.' % u)
+        # Extract sensor data and labels
+        raw_data = df[selected_columns[:6]].values
+        labels = df[selected_columns[-1]].values.reshape(-1,1)
+        volume_checker = True
+        aug_count = 0
+        while volume_checker:
+            custom_virtual_data_generation_algorithm(raw_data, u, labels, aug_count)
+            aug_count += 1
+            volume_checker = check_virtual_volume(rootdir, virtpath, limit_mb=500*number/len(train_data_dict))
+
+    print('Virtual data generation is done.')
+
+def function2():
+    # Create or load results CSV file
+    results_file = 'augmentation_results.csv'
+    if not os.path.exists(results_file):
+        results_df = pd.DataFrame(columns=['method', 'f1_score'])
+    else:
+        results_df = pd.read_csv(results_file)
+    
+    for trail_times in range(5):
+        delete_csv_files(virt_directory)
+        trial_randam_int(train_data_dict)
+        print('Virtual data generation is done.')
+        f1score = HAR_evaluation(f"switch_axis_right_left_random_{trail_times}")
+        print(f"switch_axis_right_left_random f1 score: {f1score}")
+        
+        # Record results
+        new_row = pd.DataFrame({
+            'method': [f"switch_axis_right_left_random_{trail_times}"],
+            'f1_score': [f1score]
+        })
+        results_df = pd.concat([results_df, new_row], ignore_index=True)
+        
+        # Save results after each iteration
+        results_df.to_csv(results_file, index=False)
+
+def function0():
+    # Create or load results CSV file
+    results_file = 'augmentation_results.csv'
+    if not os.path.exists(results_file):
+        results_df = pd.DataFrame(columns=['method', 'f1_score'])
+    else:
+        results_df = pd.read_csv(results_file)
+    
+    for i in [10,30,50]:
+        delete_csv_files(virt_directory)
+        StableDiffusionModel(i)
+        print('Virtual data generation is done.')
+        f1score = HAR_evaluation(f"StableDiffusionModel_{i}")
+        print(f"StableDiffusionModel_{i} f1 score: {f1score}")
+        new_row = pd.DataFrame({
+            'method': [f"StableDiffusionModel_{i}"],
+            'f1_score': [f1score]
+        })
+        results_df = pd.concat([results_df, new_row], ignore_index=True)
+        results_df.to_csv(results_file, index=False)
+
+function_list = [time_warp, magnitude_warp, jitter, scale, permute, flip]
+function_name = ['time_warp', 'magnitude_warp', 'jitter', 'scale', 'permute', 'flip']
+
+def trial_various_function(train_data_dict, right, left):
+    '''
+    This function aims to generate virtual data from train_data_dict using specified augmentation functions,
+    and save the data to virt_directory.
+    '''
+    def custom_virtual_data_generation_algorithm(data, u, labels, counter):
+        '''
+        Generate one augmented sample and save it directly to CSV
+        :param data: numpy array, shape is (data length, dim=6)
+        :param u: user ID string
+        :param labels: labels array
+        :param counter: counter for file naming
+        '''
+        # Process left channel with left augmentation function
+        left_aug = left(data[:, :3].transpose())
+        # Process right channel with right augmentation function
+        right_aug = right(data[:, 3:].transpose())
+        # Concatenate the two channels (after transposing back)
+        combined = np.concatenate([left_aug.transpose(), right_aug.transpose()], axis=1)
+        
+        # Combine with labels
+        virtual_data = np.concatenate([combined, labels], axis=1)
+        
+        # Convert to dataframe
+        df = pd.DataFrame(virtual_data, columns=new_columns)
+        
+        # Save to CSV with unique name
+        filename = f"{u}_aug_{counter}"
+        save_virtual_data(df, filename)
+        
+        return combined
+
+    def save_virtual_data(data, filename):
+        '''
+        Save CSV data to /data/virtual/
+        :param data: dataframe type
+        :param filename: name of the file without extension
+        '''
+        data.to_csv(os.path.join(virt_directory, filename + '.csv'), index=False)
+
+    number = 0
+    for u, df in train_data_dict.items():
+        number += 1
+        print('Generating virtual data from user %s.' % u)
+        # Extract sensor data and labels
+        raw_data = df[selected_columns[:6]].values
+        labels = df[selected_columns[-1]].values.reshape(-1,1)
+        volume_checker = True
+        aug_count = 0
+        while volume_checker:
+            custom_virtual_data_generation_algorithm(raw_data, u, labels, aug_count)
+            aug_count += 1
+            volume_checker = check_virtual_volume(rootdir, virtpath, limit_mb=500*number/len(train_data_dict))
+
+    print('Virtual data generation is done.')
+
+def function3():
+    # Create or load results CSV file
+    results_file = 'augmentation_results.csv'
+    if not os.path.exists(results_file):
+        results_df = pd.DataFrame(columns=['method', 'f1_score'])
+    else:
+        results_df = pd.read_csv(results_file)
+    
+    for i in range(6):
+        delete_csv_files(virt_directory)
+        trial_various_function(train_data_dict, function_list[i], function_list[i])
+        print('Virtual data generation is done.')
+        f1score = HAR_evaluation(f"{function_name[i]}")
+        print(f"{function_name[i]} f1 score: {f1score}")
+        new_row = pd.DataFrame({
+            'method': [f"{function_name[i]}"],
+            'f1_score': [f1score]
+        })
+        results_df = pd.concat([results_df, new_row], ignore_index=True)
+        results_df.to_csv(results_file, index=False)
+
+if __name__ == '__main__':
+    function1()
+    function2()
+    function0()
+    function3()
+    print('All functions are done.')
