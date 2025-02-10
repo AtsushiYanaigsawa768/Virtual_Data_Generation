@@ -7,9 +7,10 @@ import random
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from tensorflow.keras import layers, Model, Input
+from keras import layers, Model, Input
 import time
-
+import torch
+# from torch import nn
 # ----------------------------
 # Utility: set random seed
 # ----------------------------
@@ -24,6 +25,68 @@ set_random_seed(seed_value)
 # ----------------------------
 # Paths & data settings
 # ----------------------------
+def set_random_seed(seed):
+    # Set seed for Python's random module
+    random.seed(seed)
+
+    # Set seed for NumPy
+    np.random.seed(seed)
+
+    # Set seed for PyTorch
+    torch.manual_seed(seed)
+
+    # If using CUDA, set seed for GPU as well
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # For multi-GPU setups
+
+# Set a fixed random seed
+seed_value = 2025
+set_random_seed(seed_value)
+REAL_DATA = True
+realpath = r'/data/real'
+virtpath = r'/data/virtual'
+rootdir = r'/root/Virtual_Data_Generation'  # replace with your project path
+real_directory = rootdir + realpath
+virt_directory = rootdir + virtpath
+selected_columns = ['atr01/acc_x','atr01/acc_y','atr01/acc_z','atr02/acc_x','atr02/acc_y','atr02/acc_z','timestamp','operation']
+train_data_dict = {}
+splits = [0.7, 0.1, 0.2]
+
+new_columns = selected_columns[:6] + [selected_columns[-1]]
+
+print('Randomly Split the real dataset into train, validation and test sets: %s'%str(splits))
+
+print('Select acceleration data of both wrists: %s'%selected_columns)
+
+print('Data for train, validation, and test: %s'%new_columns)
+
+# Attention; When you try the new method, you must change the users information.
+train_users = ['U0102', 'U0103', 'U0104', 'U0106', 'U0109', 'U0111', 'U0201', 'U0202', 'U0203', 'U0204', 'U0206', 'U0207', 'U0208', 'U0210']
+val_users = ['U0101', 'U0209']
+test_users = ['U0105', 'U0110', 'U0205', 'U0209']
+user_paths = {}
+for root, dirs, files in os.walk(real_directory):
+    for file in files:
+        if file.endswith('S0100.csv'):
+            user_paths[file[:-10]] = os.path.join(root, file)
+        else:
+          os.remove(os.path.join(root, file))  # remove unused data
+for u, d in user_paths.items():
+    print('%s at: %s'% (u,d))
+for u in train_users:
+    # Load the CSV file with only the selected columns
+    train_data_dict[u] = pd.read_csv(user_paths[u], usecols=selected_columns)
+
+val_data_dict = {}
+for u in val_users:
+    # Load the CSV file with only the selected columns
+    val_data_dict[u] = pd.read_csv(user_paths[u], usecols=selected_columns)
+
+test_data_dict = {}
+for u in test_users:
+    # Load the CSV file with only the selected columns
+    test_data_dict[u] = pd.read_csv(user_paths[u], usecols=selected_columns)
 REAL_DATA = True  # Set to False to use dummy data
 rootdir = r'/root/Virtual_Data_Generation'  # adjust as needed
 realpath = r'/data/real'
@@ -40,7 +103,7 @@ seq_len     = 6     # Number of timesteps (e.g., 6 time steps)
 feature_dim = 6     # Features per time step (e.g., 6 sensor channels)
 batch_size  = 32
 learning_rate = 0.0002
-num_epochs  = 1000  # Adjust as needed
+num_epochs  = 1 # Adjust as needed
 
 # ----------------------------
 # Generator definition with LSTM
@@ -110,8 +173,10 @@ bce_loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
 # ----------------------------
 @tf.function
 def train_step(real_ts, real_labels):
+    # Get current batch size dynamically
+    current_batch_size = tf.shape(real_labels)[0]
     # Train Discriminator
-    noise = tf.random.normal([batch_size, noise_dim])
+    noise = tf.random.normal([current_batch_size, noise_dim])
     with tf.GradientTape() as d_tape:
         fake_ts = generator([noise, real_labels], training=True)
         real_output = discriminator([real_ts, real_labels], training=True)
@@ -124,7 +189,7 @@ def train_step(real_ts, real_labels):
     d_optimizer.apply_gradients(zip(d_gradients, discriminator.trainable_variables))
     
     # Train Generator
-    noise = tf.random.normal([batch_size, noise_dim])
+    noise = tf.random.normal([current_batch_size, noise_dim])
     with tf.GradientTape() as g_tape:
         fake_ts = generator([noise, real_labels], training=True)
         fake_output = discriminator([fake_ts, real_labels], training=True)
@@ -143,55 +208,41 @@ def get_tf_dataset(timeseries, labels):
     return dataset
 
 if REAL_DATA:
-    # Example: collect real CSV files into a dictionary (modify as needed)
-    selected_columns = ['atr01/acc_x','atr01/acc_y','atr01/acc_z',
-                        'atr02/acc_x','atr02/acc_y','atr02/acc_z',
-                        'timestamp','operation']
-    train_data_dict = {}
-    train_users = ['U0102', 'U0103', 'U0104', 'U0106', 'U0109', 'U0111',
-                   'U0201', 'U0202', 'U0203', 'U0204', 'U0206', 'U0207',
-                   'U0208', 'U0210']
-    
-    # Walk through real_directory and read CSV files named with 'S0100.csv'
-    user_paths = {}
-    for root, dirs, files in os.walk(real_directory):
+    # Use csv files in /data/conveted with "train" in the filename
+    converted_dir = rootdir + r'/data/converted'
+    train_files = []
+    for root, dirs, files in os.walk(converted_dir):
         for file in files:
-            if file.endswith('S0100.csv'):
-                user_paths[file[:-10]] = os.path.join(root, file)
-            else:
-            os.remove(os.path.join(root, file))  # remove unused data
-    for u, d in user_paths.items():
-        print('%s at: %s'% (u,d))
-    for u in train_users:
-        # Load the CSV file with only the selected columns
-        train_data_dict[u] = pd.read_csv(user_paths[u], usecols=selected_columns)
-
-    print(user_paths)
-    for u in train_users:
-        if u in user_paths:
-            # Read only the selected columns
-            df = pd.read_csv(user_paths[u], usecols=selected_columns)
-            # Note: adjust reshaping strategy based on how your real CSV is structured.
-            # Here we group every seq_len consecutive rows into one sample.
-            data = df[selected_columns[:6]].values.astype(np.float32)
-            label = df[selected_columns[-1]].values.astype(np.float32)
-            n_samples = data.shape[0] // seq_len
-            data = data[:n_samples*seq_len].reshape(n_samples, seq_len, feature_dim)
-            label = label[:n_samples*seq_len].reshape(n_samples, seq_len)[:, 0].reshape(n_samples, 1)
-            train_data_dict[u] = (data, label)
-        else:
-            print(f"Warning: No CSV file found for user {u}. Skipping.")
+            if any(user in file for user in train_users)  and file.endswith('.csv'):
+                train_files.append(os.path.join(root, file))
+                
+    if not train_files:
+        raise FileNotFoundError("No csv files with 'train' found in /data/conveted.")
     
-    # Combine all users' data
-    all_data = np.concatenate([d for (d, l) in train_data_dict.values()], axis=0)
-    all_labels = np.concatenate([l for (d, l) in train_data_dict.values()], axis=0)
-    
+    train_data_list = []
+    for csv_file in train_files:
+        print(f"Reading {csv_file}")
+        # Read only the selected columns: sensor data and operation label
+        df = pd.read_csv(csv_file, usecols=new_columns)
+        n_samples = len(df) // seq_len
+        if n_samples < 1:
+            continue
+        # Use only the sensor columns for timeseries data
+        sensor_cols = new_columns[:-1]
+        data = df[sensor_cols].values.astype(np.float32)
+        data = data[:n_samples * seq_len].reshape(n_samples, seq_len, -1)
+        # Extract labels from the 'operation' column
+        labels = df['operation'].values[:n_samples].reshape(n_samples, 1)
+        train_data_list.append((data, labels))
+    # Combine data from all files
+    all_data = np.concatenate([item[0] for item in train_data_list], axis=0)
+    all_labels = np.concatenate([item[1] for item in train_data_list], axis=0)
 else:
-    # Create dummy data: 1000 samples of time-series with seq_len time steps
+    # Create dummy data
     num_samples = 1000
     all_data = np.random.uniform(-1, 1, size=(num_samples, seq_len, feature_dim)).astype(np.float32)
-    # Dummy labels: in this example, use a constant value (e.g., 8100.0) for all samples
     all_labels = np.full((num_samples, 1), 8100.0, dtype=np.float32)
+
 
 dataset = get_tf_dataset(all_data, all_labels)
 
@@ -234,12 +285,15 @@ def save_virtual_data(data, labels, filename):
 
 # For each user (or once globally), generate virtual data and save
 if REAL_DATA:
-    for u, (real_ts, real_labels) in train_data_dict.items():
-        num_samples = real_labels.shape[0]
+    for u, df in train_data_dict.items():
+        sensor_cols = new_columns[:-1]
+        data_array = df[sensor_cols].values.astype(np.float32)
+        n = (data_array.shape[0] // seq_len) * seq_len
+        real_ts = data_array[:n].reshape(-1, seq_len, feature_dim)
+        real_labels = df['operation'].values.reshape(-1, 1)
+        num_samples = real_ts.shape[0]
         virtual_ts = generate_virtual_data(real_labels, num_samples)
         save_virtual_data(virtual_ts, real_labels, u)
-else:
-    # For dummy data, generate virtual data and save as one file.
     num_samples = all_labels.shape[0]
     virtual_ts = generate_virtual_data(all_labels, num_samples)
     save_virtual_data(virtual_ts, all_labels, "virtual_dummy")

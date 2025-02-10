@@ -537,7 +537,7 @@ def function0():
     else:
         results_df = pd.read_csv(results_file)
     
-    for i in [10,30,50]:
+    for i in [30]:
         delete_csv_files(virt_directory)
         StableDiffusionModel(i)
         print('Virtual data generation is done.')
@@ -631,8 +631,5 @@ def function3():
         results_df.to_csv(results_file, index=False)
 
 if __name__ == '__main__':
-    function1()
     function2()
-    function0()
     function3()
-    print('All functions are done.')

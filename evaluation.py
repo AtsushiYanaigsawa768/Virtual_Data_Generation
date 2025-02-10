@@ -480,5 +480,5 @@ def HAR_evaluation(model_name):
     return f1
 
 if __name__ == '__main__':
-    model_name = 'Stable_Diffusion'
+    model_name = 'test'
     HAR_evaluation(model_name)

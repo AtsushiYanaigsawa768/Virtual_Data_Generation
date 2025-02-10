@@ -74,6 +74,7 @@ for u, d in user_paths.items():
     print('%s at: %s' % (u, d))
 memory_checker = True
 label_number = 0
+delete_csv_files(virt_directory)
 while memory_checker:
     label_number += 1
 
@@ -116,5 +117,8 @@ while memory_checker:
         generated_df.to_csv(os.path.join(virt_directory, f'generated_{op}_{label_number}.csv'), index=False)
     memory_checker = check_virtual_volume(rootdir, virtpath)
 print('Virtual data generation is completed.')
+
+f1score = HAR_evaluation("StatistcArgumentation")
+print('F1-score: %s'%f1score)
 
 
