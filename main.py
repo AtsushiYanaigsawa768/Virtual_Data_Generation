@@ -508,8 +508,10 @@ def function2():
     # Create or load results CSV file
     results_file = 'augmentation_results.csv'
     if not os.path.exists(results_file):
+        print('No results file found.')
         results_df = pd.DataFrame(columns=['method', 'f1_score'])
     else:
+        print('Results file found.')
         results_df = pd.read_csv(results_file)
     
     for trail_times in range(5):
@@ -631,5 +633,4 @@ def function3():
         results_df.to_csv(results_file, index=False)
 
 if __name__ == '__main__':
-    function2()
     function3()

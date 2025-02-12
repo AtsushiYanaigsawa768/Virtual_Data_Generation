@@ -451,7 +451,7 @@ def HAR_evaluation(model_name):
     plt.legend()
     plt.xlabel('iteration')
     plt.ylabel('loss value')
-    plt.savefig(f'Virtual_Data_Generation/Results/{model_name}.png')
+    plt.savefig(f'/root/Virtual_Data_Generation/Results/{model_name}.png')
 
     with torch.no_grad():
         model.eval()
@@ -480,5 +480,5 @@ def HAR_evaluation(model_name):
     return f1
 
 if __name__ == '__main__':
-    model_name = 'test'
+    model_name = 'linear_5'
     HAR_evaluation(model_name)
