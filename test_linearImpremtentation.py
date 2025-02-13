@@ -1,12 +1,18 @@
 import os
+import glob
 import pandas as pd
 import numpy as np
-import random
-from scipy.interpolate import Rbf
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, Rbf
+from scipy.optimize import curve_fit
+from evaluation import HAR_evaluation
+from delete import delete_csv_files
 from volumeChecker import check_virtual_volume
-rootdir = r'/root/Virtual_Data_Generation'
-virtpath = r'/data/test'
+realpath = r'/data/real'
+virtpath = r'/data/virtual'
+rootdir = r'/root/Virtual_Data_Generation'  # replace with your project path
+real_directory = rootdir + realpath
+virt_directory = rootdir + virtpath
+# --- 補間関数群 ---
 def interpolate_results(random_times, df_grouped):
     results = []
     ts_array = df_grouped['timestamp'].values
@@ -19,8 +25,12 @@ def interpolate_results(random_times, df_grouped):
                 value = df_grouped.loc[df_grouped['timestamp'] == rt, col].mean()
             else:
                 pos = np.searchsorted(ts_array, rt)
-                lower_idx = pos - 1
-                upper_idx = pos
+                if pos == 0:
+                    lower_idx, upper_idx = 0, 1
+                elif pos >= len(ts_array):
+                    lower_idx, upper_idx = len(ts_array) - 2, len(ts_array) - 1
+                else:
+                    lower_idx, upper_idx = pos - 1, pos
                 t0 = ts_array[lower_idx]
                 t1 = ts_array[upper_idx]
                 y0 = df_grouped.loc[df_grouped['timestamp'] == t0, col].mean()
@@ -33,17 +43,15 @@ def interpolate_results(random_times, df_grouped):
 def rbf_adapt(random_times, df_grouped):
     results = []
     ts_array = df_grouped['timestamp'].values
-    # Precompute Rbf interpolators for all columns except 'timestamp'
     rbfs = {}
     for col in df_grouped.columns:
         if col == "timestamp":
             continue
-        rbfs[col] = Rbf(ts_array, df_grouped[col].values, function='thin_plate', epsilon=1)
+        rbfs[col] = Rbf(ts_array, df_grouped[col].values, function='multiquadric', epsilon=1)
     
     for rt in random_times:
         row = {"timestamp": rt}
         for col, rbf in rbfs.items():
-            # Compute the interpolated value at rt
             row[col] = rbf(rt)
         results.append(row)
     return results
@@ -56,75 +64,151 @@ def cubic_implementation(random_times, df_grouped):
         for col in df_grouped.columns:
             if col == "timestamp":
                 continue
-            x = ts_array
-            y = df_grouped[col].values
-            # Create a cubic interpolator with extrapolation enabled
-            cubic_interp = interp1d(x, y, kind='cubic')
+            cubic_interp = interp1d(ts_array, df_grouped[col].values, kind='cubic', fill_value="extrapolate")
             row[col] = float(cubic_interp(rt))
         results.append(row)
     return results
-def read_and_interpolate(operation_int, repeat_int,method='linear'):
-    # CSVファイルのパス
-    csv_path = f"/root/Virtual_Data_Generation/data/converted4/{operation_int}.csv"
-    
-    # CSVファイルを読み込み
-    df = pd.read_csv(csv_path)
 
-    # 同じtimestampが複数ある場合は平均を取る
-    df_grouped = df.groupby('timestamp', as_index=False).mean()
-    
-    # timestampで昇順にソート
-    df_grouped = df_grouped.sort_values('timestamp')
-    
-    # timestampの最小値と最大値を取得
-    t_min = df_grouped['timestamp'].min()
-    t_max = df_grouped['timestamp'].max()
+def curve_fit_implementation(random_times, df_grouped):
+    def func(x, a, b, c, d, e, f, g):
+        return a * x**6 + b * x**5 + c * x**4 + d * x**3 + e * x**2 + f * x + g
 
-    # repeat_int個のランダムなタイムスタンプを生成（t_min, t_max は必ず含む）
-    random_times = [t_min, t_max]
-    for _ in range(repeat_int -2):
-        random_times.append(random.uniform(t_min, t_max))
-    
-    # 重複を避けるために、ソートしてリストで保持
-    random_times = sorted(random_times)
-    if method == 'linear':
-        results = interpolate_results(random_times, df_grouped)
-    elif method == 'rbf':
-        results = rbf_adapt(random_times, df_grouped)
-    elif method == 'cubic':
-        results = cubic_implementation(random_times, df_grouped)
+    results = []
+    ts_array = df_grouped['timestamp'].values
+    popt_dict = {}
+    for col in df_grouped.columns:
+        if col == "timestamp":
+            continue
+        try:
+            popt, _ = curve_fit(func, ts_array, df_grouped[col].values)
+        except Exception:
+            popt = np.polyfit(ts_array, df_grouped[col].values, 1)
+        popt_dict[col] = popt
+
+    for rt in random_times:
+        row = {"timestamp": rt}
+        for col, popt in popt_dict.items():
+            row[col] = func(rt, *popt)
+        results.append(row)
+    return results
+
+def fft_interpolate(fs, amp_array, time_array, k=0):
+    N = len(amp_array)
+    freq_array = np.fft.rfftfreq(N, d=1/fs)
+    fft_amp_array = 2.0 / N * np.fft.rfft(amp_array)
+    fft_amp_array[0] /= 2.0
+    fft_amp_array = 1j**k * fft_amp_array
+    an = np.real(fft_amp_array)
+    bn = -np.imag(fft_amp_array)
+    factor = (2 * np.pi * freq_array)**k
+    cos_vals = np.cos(2 * np.pi * np.outer(freq_array, time_array))
+    sin_vals = np.sin(2 * np.pi * np.outer(freq_array, time_array))
+    amp_array_interp = (factor[:, None] * (an[:, None] * cos_vals + bn[:, None] * sin_vals)).sum(axis=0)
+    return amp_array_interp
+
+def fft_implementation(random_times, df_grouped):
+    ts_array = df_grouped['timestamp'].values
+    if len(ts_array) > 1:
+        dt = np.mean(np.diff(ts_array))
+        fs = 1.0 / dt if dt != 0 else 1.0
     else:
-        raise ValueError("Invalid interpolation method")
-    for result in results:
-        result["operation"] = float(operation_int)
-    df_results = pd.DataFrame(results)
-    # 降順ソート(必要に応じて)
-    df_results = df_results.sort_values('timestamp', ascending=True)
+        fs = 1.0
+
+    rt_array = np.array(random_times)
+    results = [{"timestamp": rt} for rt in random_times]
+
+    for col in df_grouped.columns:
+        if col == "timestamp":
+            continue
+        amp_array = df_grouped[col].values
+        interpolated_vals = fft_interpolate(fs, amp_array, rt_array, k=0)
+        for idx, val in enumerate(interpolated_vals):
+            results[idx][col] = float(val)
+    return results
+
+# --- 補間処理のメイン関数 ---
+def process_interpolation(input_dir, output_dir, selected_columns, explanatory_columns,iteration,method):
+    csv_files = glob.glob(os.path.join(input_dir, '*.csv'))
+
+    for csv_file in csv_files:
+        # CSVの読み込みと必要な列の抽出
+        df = pd.read_csv(csv_file)
+        df = df[selected_columns]
     
-    return df_results
-
-
-def main_loop(operation_int,repeat_int,volume_limit=500,method='linear'):
-    output_csv = rootdir +  r'/data/test' + f'/interpolated_{operation_int}.csv'
-    # 既存の出力ファイルがあれば削除しておく
-    if os.path.exists(output_csv):
-        os.remove(output_csv)
-    volume_checker = True
-    import time
-    while volume_checker:
-        df_results = read_and_interpolate(operation_int, repeat_int, method=method)
-        # timestamp列を除外して保存
-        df_to_save = df_results.drop(columns=["timestamp"])
+        # operationが変わるタイミングで区間（グループ）を設定
+        df['group'] = (df['operation'] != df['operation'].shift()).cumsum()
+    
+        all_interpolated = []  # 各区間の補間結果を保持するリスト
+    
+        for group_id, group_df in df.groupby('group'):
+            group_df = group_df.reset_index(drop=True)
         
-        # 既存のCSVに追記（ファイルがなければヘッダー付きで作成）
-        df_to_save.to_csv(output_csv, mode='a', header=not os.path.exists(output_csv), index=False)       
-        # volumeCheckerを利用して現在のvolumeを確認
-        volume_checker = check_virtual_volume(rootdir, r'/data/test', volume_limit)
-        # Sleep to prevent high CPU usage and excessive resource consumption
-        time.sleep(1)
+            # 1. タイムスタンプのリセット：最初の値を0にする
+            start_time = group_df.loc[0, 'timestamp']
+            group_df['timestamp'] = group_df['timestamp'] - start_time
+        
+            num_points = len(group_df)
+        
+            # 4. [0, 最終timestamp] の範囲から num_points 個の時刻をランダムに抽出（昇順にソート）
+            if num_points > 1:
+                new_times = np.sort(np.random.uniform(0, group_df['timestamp'].iloc[-1], num_points))
+            else:
+                new_times = group_df['timestamp'].values
+        
+            # 補間対象は timestamp と各説明変数
+            interp_df = group_df[['timestamp'] + explanatory_columns]
+        
+            if method == 'linear':
+                interp_result  = interpolate_results(new_times, interp_df)
+            elif method == 'rbf':
+                interp_result  = rbf_adapt(new_times, interp_df)
+            elif method == 'cubic':
+                interp_result  = cubic_implementation(new_times, interp_df)
+            elif method == 'curve_fit':
+                interp_result  = curve_fit_implementation(new_times, interp_df)
+            elif method == 'fft':
+                interp_result  = fft_implementation(new_times, interp_df)
+            else:
+                raise ValueError("Invalid interpolation method")
+            # 補間結果に元の operation の値を追加
+            for row in interp_result:
+                row['operation'] = group_df.loc[0, 'operation']
+        
+            all_interpolated.extend(interp_result)
+    
+        # 補間結果をDataFrameに変換、出力（timestamp列は除去）
+        result_df = pd.DataFrame(all_interpolated).drop(columns=['timestamp'])
+        output_file = os.path.join(output_dir, f"{os.path.basename(csv_file)}_{iteration}.csv")
+        result_df.to_csv(output_file, index=False)
+        print(f"Processed and saved: {output_file}")
 
+# --- ある条件が整うまで生成を続けるメインループ ---
+def generate_until_condition(input_dir, output_dir, selected_columns, explanatory_columns, i):
+    iteration = 0
+    delete_csv_files(virt_directory)
+    volume_checker = True
+    while volume_checker:
+        print(f"Iteration: {iteration}")
+        process_interpolation(input_dir, output_dir, selected_columns, explanatory_columns,iteration,i)
+        print("Iteration completed. Checking condition...\n")
+        iteration += 1
+        volume_checker = check_virtual_volume(rootdir, virtpath, limit_mb=500)
+    F1score = HAR_evaluation(iteration)
+    print("Condition met. Generation stopped.")
+    return F1score
+
+# --- 呼び出し例 ---
 if __name__ == "__main__":
-    i = 0
-    for operation_int in [100,200,300,400,500,600,700,800,900,1000,8100]:
-        i += 1
-        main_loop(operation_int=operation_int,repeat_int=300,volume_limit=i * 10,method='cubic')
+    input_dir = '/root/Virtual_Data_Generation/data/real'
+    output_dir = '/root/Virtual_Data_Generation/data/virtual'
+    selected_columns = ['atr01/acc_x','atr01/acc_y','atr01/acc_z',
+                        'atr02/acc_x','atr02/acc_y','atr02/acc_z',
+                        'timestamp','operation']
+    explanatory_columns = ['atr01/acc_x','atr01/acc_y','atr01/acc_z',
+                           'atr02/acc_x','atr02/acc_y','atr02/acc_z']
+    F1score_list = []
+    for i in ['linear','cubic','curve_fit','fft',"rbf"]:
+        # 条件関数 condition_met を満たすまで処理を繰り返す
+        F1score = generate_until_condition(input_dir, output_dir, selected_columns, explanatory_columns,i)
+        F1score_list.append(F1score)
+    print(F1score_list)

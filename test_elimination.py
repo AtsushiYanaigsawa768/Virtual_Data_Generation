@@ -6,9 +6,6 @@ from scipy.interpolate import Rbf
 from scipy.interpolate import interp1d
 from volumeChecker import check_virtual_volume
 from scipy.optimize import curve_fit
-from scipy.interpolate import Akima1DInterpolator
-from scipy.interpolate import PchipInterpolator
-from evaluation import HAR_evaluation
 rootdir = r'/root/Virtual_Data_Generation'
 virtpath = r'/data/test'
 def interpolate_results(random_times, df_grouped):
@@ -23,8 +20,12 @@ def interpolate_results(random_times, df_grouped):
                 value = df_grouped.loc[df_grouped['timestamp'] == rt, col].mean()
             else:
                 pos = np.searchsorted(ts_array, rt)
-                lower_idx = pos - 1
-                upper_idx = pos
+                if pos == 0:
+                    lower_idx, upper_idx = 0, 1
+                elif pos >= len(ts_array):
+                    lower_idx, upper_idx = len(ts_array) - 2, len(ts_array) - 1
+                else:
+                    lower_idx, upper_idx = pos - 1, pos
                 t0 = ts_array[lower_idx]
                 t1 = ts_array[upper_idx]
                 y0 = df_grouped.loc[df_grouped['timestamp'] == t0, col].mean()
@@ -70,9 +71,8 @@ def cubic_implementation(random_times, df_grouped):
 
 def curve_fit_implementation(random_times, df_grouped):
     # Define a simple linear function for curve fitting
-    def func(x, a, b, c, d, e, f, g,):
-        return (a * x**6 + b * x**5 + c * x**4 + d * x**3 +
-                e * x**2 + f * x + g )
+    def func(x, a, b, c, d, e, f, g):
+        return a * x**6 + b * x**5 + c * x**4 + d * x**3 + e * x**2 + f * x + g
 
     results = []
     ts_array = df_grouped['timestamp'].values
@@ -95,41 +95,41 @@ def curve_fit_implementation(random_times, df_grouped):
         results.append(row)
     return results
 
-def akima_implementation(random_times, df_grouped):
-    results = []
+def fft_interpolate(fs, amp_array, time_array, k=0):
+    N = len(amp_array)
+    freq_array = np.fft.rfftfreq(N, d=1/fs)
+    fft_amp_array = 2.0 / N * np.fft.rfft(amp_array)
+    fft_amp_array[0] /= 2.0
+    fft_amp_array = 1j**k * fft_amp_array
+    an = np.real(fft_amp_array)
+    bn = -np.imag(fft_amp_array)
+    factor = (2 * np.pi * freq_array)**k
+    # Vectorized computation across all frequencies and time points
+    cos_vals = np.cos(2 * np.pi * np.outer(freq_array, time_array))
+    sin_vals = np.sin(2 * np.pi * np.outer(freq_array, time_array))
+    amp_array_interp = (factor[:, None] * (an[:, None] * cos_vals + bn[:, None] * sin_vals)).sum(axis=0)
+    return amp_array_interp
+
+def fft_implementation(random_times, df_grouped):
     ts_array = df_grouped['timestamp'].values
-    # Precompute Akima interpolators for all columns except 'timestamp'
-    akimas = {}
+    if len(ts_array) > 1:
+        dt = np.mean(np.diff(ts_array))
+        fs = 1.0 / dt if dt != 0 else 1.0
+    else:
+        fs = 1.0
+
+    rt_array = np.array(random_times)
+    results = [{"timestamp": rt} for rt in random_times]
+
+    # Pre-compute interpolated values for each column at once
     for col in df_grouped.columns:
         if col == "timestamp":
             continue
-        akimas[col] = Akima1DInterpolator(ts_array, df_grouped[col].values)
-    
-    for rt in random_times:
-        row = {"timestamp": rt}
-        for col, akima in akimas.items():
-            row[col] = float(akima(rt))
-        results.append(row)
+        amp_array = df_grouped[col].values
+        interpolated_vals = fft_interpolate(fs, amp_array, rt_array, k=0)
+        for idx, val in enumerate(interpolated_vals):
+            results[idx][col] = float(val)
     return results
-
-def pchip_implementation(random_times, df_grouped):
-    results = []
-    ts_array = df_grouped['timestamp'].values
-    # Precompute Pchip interpolators for all columns except 'timestamp'
-    pchips = {}
-    for col in df_grouped.columns:
-        if col == "timestamp":
-            continue
-        pchips[col] = PchipInterpolator(ts_array, df_grouped[col].values)
-    
-    for rt in random_times:
-        row = {"timestamp": rt}
-        for col, pchip in pchips.items():
-            row[col] = float(pchip(rt))
-        results.append(row)
-    return results
-
-
 def read_and_interpolate(operation_int, repeat_int,method='linear'):
     # CSVファイルのパス
     csv_path = f"/root/Virtual_Data_Generation/data/converted4/{operation_int}.csv"
@@ -147,11 +147,10 @@ def read_and_interpolate(operation_int, repeat_int,method='linear'):
     t_min = df_grouped['timestamp'].min()
     t_max = df_grouped['timestamp'].max()
 
-    # repeat_int個のランダムなタイムスタンプを生成（t_min, t_max は必ず含む）
-    random_times = [t_min, t_max]
-    for _ in range(repeat_int -2):
-        random_times.append(random.uniform(t_min, t_max))
-    
+    # repeat_int個の要素 (t_min と t_max を含む) の等間隔のタイムスタンプを生成し、各値にN(0,1)のノイズを加える
+    base_times = np.linspace(t_min, t_max, repeat_int)
+    noise = np.random.normal(0, 1, repeat_int)
+    random_times = (base_times + noise).tolist()
     # 重複を避けるために、ソートしてリストで保持
     random_times = sorted(random_times)
     if method == 'linear':
@@ -162,10 +161,8 @@ def read_and_interpolate(operation_int, repeat_int,method='linear'):
         results = cubic_implementation(random_times, df_grouped)
     elif method == 'curve_fit':
         results = curve_fit_implementation(random_times, df_grouped)
-    elif method == 'akima':
-        results = akima_implementation(random_times, df_grouped)
-    elif method == 'pchip':
-        results = pchip_implementation(random_times, df_grouped)
+    elif method == 'fft':
+        results = fft_implementation(random_times, df_grouped)
     else:
         raise ValueError("Invalid interpolation method")
     for result in results:
@@ -178,7 +175,7 @@ def read_and_interpolate(operation_int, repeat_int,method='linear'):
 
 
 def main_loop(operation_int,repeat_int,volume_limit=500,method='linear'):
-    output_csv = rootdir +  r'/data/virtual' + f'/interpolated_{operation_int}.csv'
+    output_csv = rootdir +  r'/data/test3' + f'/interpolated_{operation_int}.csv'
     # 既存の出力ファイルがあれば削除しておく
     if os.path.exists(output_csv):
         os.remove(output_csv)
@@ -191,11 +188,10 @@ def main_loop(operation_int,repeat_int,volume_limit=500,method='linear'):
         # 既存のCSVに追記（ファイルがなければヘッダー付きで作成）
         df_to_save.to_csv(output_csv, mode='a', header=not os.path.exists(output_csv), index=False)       
         # volumeCheckerを利用して現在のvolumeを確認
-        volume_checker = check_virtual_volume(rootdir,r'/data/virtual',volume_limit)
+        volume_checker = check_virtual_volume(rootdir,r'/data/test3',volume_limit)
 
 if __name__ == "__main__":
     i = 0
     for operation_int in [100,200,300,400,500,600,700,800,900,1000,8100]:
         i += 1
-        main_loop(operation_int=operation_int,repeat_int=600,volume_limit=10,method='curve_fit')
-    HAR_evaluation("curve_fit")
+        main_loop(operation_int=operation_int,repeat_int=300,volume_limit=i * 10,method='fft')

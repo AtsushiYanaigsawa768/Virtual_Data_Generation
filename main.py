@@ -277,7 +277,7 @@ def time_warp(sample,  sigma=0.2):
     sample = np.swapaxes(sample, 0, 1)
     return sample
 
-def jitter(sample, sigma=0.01):
+def jitter(sample, sigma=0.6):
     """
     Jitter augmentation: add Gaussian noise to the input sample.
 
@@ -553,7 +553,7 @@ def function0():
         results_df.to_csv(results_file, index=False)
 
 function_list = [ jitter,]
-function_name = [ 'jitter_test', ]
+function_name = [ 'jitter_test_32', ]
 
 def trial_various_function(train_data_dict, right, left):
     '''
