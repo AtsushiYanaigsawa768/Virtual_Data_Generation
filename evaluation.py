@@ -480,5 +480,5 @@ def HAR_evaluation(model_name):
     return f1
 
 if __name__ == '__main__':
-    model_name = 'linear_5'
+    model_name = 'linear_8'
     HAR_evaluation(model_name)

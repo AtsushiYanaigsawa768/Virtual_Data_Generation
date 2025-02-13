@@ -95,6 +95,41 @@ def curve_fit_implementation(random_times, df_grouped):
         results.append(row)
     return results
 
+def fft_interpolate(fs, amp_array, time_array, k=0):
+    N = len(amp_array)
+    freq_array = np.fft.rfftfreq(N, d=1/fs)
+    fft_amp_array = 2.0 / N * np.fft.rfft(amp_array)
+    fft_amp_array[0] /= 2.0
+    fft_amp_array = 1j**k * fft_amp_array
+    an = np.real(fft_amp_array)
+    bn = -np.imag(fft_amp_array)
+    factor = (2 * np.pi * freq_array)**k
+    # Vectorized computation across all frequencies and time points
+    cos_vals = np.cos(2 * np.pi * np.outer(freq_array, time_array))
+    sin_vals = np.sin(2 * np.pi * np.outer(freq_array, time_array))
+    amp_array_interp = (factor[:, None] * (an[:, None] * cos_vals + bn[:, None] * sin_vals)).sum(axis=0)
+    return amp_array_interp
+
+def fft_implementation(random_times, df_grouped):
+    ts_array = df_grouped['timestamp'].values
+    if len(ts_array) > 1:
+        dt = np.mean(np.diff(ts_array))
+        fs = 1.0 / dt if dt != 0 else 1.0
+    else:
+        fs = 1.0
+
+    rt_array = np.array(random_times)
+    results = [{"timestamp": rt} for rt in random_times]
+
+    # Pre-compute interpolated values for each column at once
+    for col in df_grouped.columns:
+        if col == "timestamp":
+            continue
+        amp_array = df_grouped[col].values
+        interpolated_vals = fft_interpolate(fs, amp_array, rt_array, k=0)
+        for idx, val in enumerate(interpolated_vals):
+            results[idx][col] = float(val)
+    return results
 def read_and_interpolate(operation_int, repeat_int,method='linear'):
     # CSVファイルのパス
     csv_path = f"/root/Virtual_Data_Generation/data/converted4/{operation_int}.csv"
@@ -126,6 +161,8 @@ def read_and_interpolate(operation_int, repeat_int,method='linear'):
         results = cubic_implementation(random_times, df_grouped)
     elif method == 'curve_fit':
         results = curve_fit_implementation(random_times, df_grouped)
+    elif method == 'fft':
+        results = fft_implementation(random_times, df_grouped)
     else:
         raise ValueError("Invalid interpolation method")
     for result in results:
@@ -157,4 +194,4 @@ if __name__ == "__main__":
     i = 0
     for operation_int in [100,200,300,400,500,600,700,800,900,1000,8100]:
         i += 1
-        main_loop(operation_int=operation_int,repeat_int=300,volume_limit=i * 10,method='linear')
+        main_loop(operation_int=operation_int,repeat_int=300,volume_limit=i * 10,method='fft')

@@ -277,7 +277,7 @@ def time_warp(sample,  sigma=0.2):
     sample = np.swapaxes(sample, 0, 1)
     return sample
 
-def jitter(sample, sigma=0.03):
+def jitter(sample, sigma=0.01):
     """
     Jitter augmentation: add Gaussian noise to the input sample.
 
@@ -552,8 +552,8 @@ def function0():
         results_df = pd.concat([results_df, new_row], ignore_index=True)
         results_df.to_csv(results_file, index=False)
 
-function_list = [time_warp, magnitude_warp, jitter, scale, permute, flip]
-function_name = ['time_warp', 'magnitude_warp', 'jitter', 'scale', 'permute', 'flip']
+function_list = [ jitter,]
+function_name = [ 'jitter_test', ]
 
 def trial_various_function(train_data_dict, right, left):
     '''
@@ -619,7 +619,7 @@ def function3():
     else:
         results_df = pd.read_csv(results_file)
     
-    for i in range(6):
+    for i in range(1):
         delete_csv_files(virt_directory)
         trial_various_function(train_data_dict, function_list[i], function_list[i])
         print('Virtual data generation is done.')
