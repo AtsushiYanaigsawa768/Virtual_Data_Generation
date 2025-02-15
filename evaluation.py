@@ -85,7 +85,7 @@ def set_random_seed(seed):
 seed_value = 2025
 set_random_seed(seed_value)
 
-def HAR_evaluation(model_name):
+def HAR_evaluation(model_name,virt_directory):
     # find csv files in 'data/virtual'
     virt_paths = []
     for root, dirs, files in os.walk(virt_directory):
@@ -445,14 +445,7 @@ def HAR_evaluation(model_name):
         # Print the current learning rate
         current_lr = scheduler.get_last_lr()[0]  # Get the current learning rate
         print(f'Epoch {epoch + 1}, Learning Rate: {current_lr}')
-    plt.figure(figsize=(6,4))
-    plt.plot(val_losses, label='valid loss')
-    plt.plot(train_losses, label='train loss')
-    plt.grid()
-    plt.legend()
-    plt.xlabel('iteration')
-    plt.ylabel('loss value')
-    plt.savefig(f'/root/Virtual_Data_Generation/Results/{model_name}.png')
+
 
     with torch.no_grad():
         model.eval()
@@ -478,6 +471,15 @@ def HAR_evaluation(model_name):
         f1 = f1_score(y_true, y_pred, average='macro')
 
         print(f'F1 Score of test set: {f1:.4f}')
+    plt.figure(figsize=(6,4))
+    plt.plot(val_losses, label='valid loss')
+    plt.plot(train_losses, label='train loss')
+    plt.title(f'F1: {f1:.4f}')
+    plt.grid()
+    plt.legend()
+    plt.xlabel('iteration')
+    plt.ylabel('loss value')
+    plt.savefig(f'/root/Virtual_Data_Generation/Results/{model_name}.png')
     return f1
 
 if __name__ == '__main__':
