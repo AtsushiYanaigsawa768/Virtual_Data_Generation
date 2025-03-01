@@ -85,7 +85,7 @@ def set_random_seed(seed):
 seed_value = 2025
 set_random_seed(seed_value)
 
-def HAR_evaluation(model_name,virt_directory):
+def HAR_evaluation(model_name,virt_directory="/root/Virtual_Data_Generation/data/virtual"):
     # find csv files in 'data/virtual'
     virt_paths = []
     for root, dirs, files in os.walk(virt_directory):
@@ -483,5 +483,5 @@ def HAR_evaluation(model_name,virt_directory):
     return f1
 
 if __name__ == '__main__':
-    model_name = 'linear_8'
-    HAR_evaluation(model_name)
+    model_name = 'rbf_linear_new_random_liner'
+    HAR_evaluation(model_name,"/root/Virtual_Data_Generation/data/test")

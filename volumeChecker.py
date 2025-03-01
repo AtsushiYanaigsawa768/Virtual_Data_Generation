@@ -23,7 +23,7 @@ def check_virtual_volume(rootdir, virtpath, limit_mb=500):
     limit = limit_mb * 1024 * 1024  # convert MB to bytes
 
     if total_virtual_size <= limit:
-        # print(f"合計サイズは {total_virtual_size/(1024**2):.2f} MB で、{limit_mb}MB以下です。")
+        print(f"合計サイズは {total_virtual_size/(1024**2):.2f} MB で、{limit_mb}MB以下です。")
         return True
     else:
         print(f"合計サイズは {total_virtual_size/(1024**2):.2f} MB で、{limit_mb}MBを超えています。")
