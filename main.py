@@ -231,25 +231,6 @@ def calculate_segment_length_distributions(train_data_dict):
             seg_len = len(group_df)
             raw_segment_length_dist.setdefault(key, []).append(seg_len)
 
-    # IQRを使用して外れ値を除外する
-    for key, lengths in raw_segment_length_dist.items():
-        lengths_arr = np.array(lengths)
-        
-        # IQR計算
-        q1 = np.percentile(lengths_arr, 25)
-        q3 = np.percentile(lengths_arr, 75)
-        iqr = q3 - q1
-        
-        # 外れ値の境界を定義 (一般的に使われる1.5*IQRを使用)
-        lower_bound = q1 - 1.5 * iqr
-        upper_bound = q3 + 1.5 * iqr
-        
-        # 外れ値でないデータのみをフィルタリング
-        filtered_lengths = lengths_arr[(lengths_arr >= lower_bound) & (lengths_arr <= upper_bound)]
-        
-        # 外れ値を除いたデータを保存
-        segment_length_dist[key] = filtered_lengths.tolist()
-
     # 各セグメントの統計量を出力（デバッグ用）
     for key, lengths in segment_length_dist.items():
         lengths_arr = np.array(lengths)
@@ -751,11 +732,12 @@ def process_csv_files(output_dir, num_timestamps=None,
 # ---------------------------
 if __name__ == '__main__':
     f1_scores = {}
+    segment_length_dist, raw_segment_length_dist = calculate_segment_length_distributions(train_data_dict)
     distribution_types = ['normal']
     for dist_type in distribution_types:
         f1_scores[dist_type] = []
-        for outlier_method in ["none"]:
-            for interp_method in ["rbf_multiquadric"]:
+        for outlier_method in ["savitzky_golay"]:
+            for interp_method in ["rbf_inverse"]:
                 f1_scores_runs = []
                 for run in range(1):  # Run each experiment 3 times
                     process_csv_files(output_dir='/root/Virtual_Data_Generation/data/virtual',
