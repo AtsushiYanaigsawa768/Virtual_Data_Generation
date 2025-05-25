@@ -18,7 +18,6 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import f1_score
 from evaluation import HAR_evaluation
 from delete import delete_csv_files
-from StableDiffusion import StableDiffusionModel
 from volumeChecker import check_virtual_volume
 """
 Variable Part/Preparation
@@ -277,7 +276,7 @@ def time_warp(sample,  sigma=0.2):
     sample = np.swapaxes(sample, 0, 1)
     return sample
 
-def jitter(sample, sigma=0.6):
+def jitter(sample, sigma=0.1):
     """
     Jitter augmentation: add Gaussian noise to the input sample.
 
@@ -531,29 +530,8 @@ def function2():
         # Save results after each iteration
         results_df.to_csv(results_file, index=False)
 
-def function0():
-    # Create or load results CSV file
-    results_file = 'augmentation_results.csv'
-    if not os.path.exists(results_file):
-        results_df = pd.DataFrame(columns=['method', 'f1_score'])
-    else:
-        results_df = pd.read_csv(results_file)
-    
-    for i in [30]:
-        delete_csv_files(virt_directory)
-        StableDiffusionModel(i)
-        print('Virtual data generation is done.')
-        f1score = HAR_evaluation(f"StableDiffusionModel_{i}")
-        print(f"StableDiffusionModel_{i} f1 score: {f1score}")
-        new_row = pd.DataFrame({
-            'method': [f"StableDiffusionModel_{i}"],
-            'f1_score': [f1score]
-        })
-        results_df = pd.concat([results_df, new_row], ignore_index=True)
-        results_df.to_csv(results_file, index=False)
-
-function_list = [jitter,  flip, permute, scale, time_warp, magnitude_warp]
-function_name = [ 'jitter', 'flip', 'permute', 'scale', 'time_warp', 'magnitude_warp']
+function_list = [jitter, ]
+function_name = [ 'jitter', ]
 def trial_various_function(train_data_dict, right, left):
     '''
     This function aims to generate virtual data from train_data_dict using specified augmentation functions,
@@ -630,12 +608,6 @@ def function3():
         })
         results_df = pd.concat([results_df, new_row], ignore_index=True)
         results_df.to_csv(results_file, index=False)
-"""
-Define jitter augmentation (sigma is the noise scale)
-"""
-def jitter(sample, sigma=0.6):
-    noise = np.random.normal(loc=0.0, scale=sigma, size=sample.shape)
-    return sample + noise
 
 """
 Assume switch_axis is defined elsewhere.
@@ -691,17 +663,54 @@ def custom_virtual_data_generation_1(train_data_dict, i, j, sigma, round_digits)
     return total_csv_count
 
 if __name__ == '__main__':
-    function3()
-    for round_digits in range(1, 6):
-        for i in range(5):
-            fixed_sigma = 10^(-round_digits)
-            # Clear any previously generated CSV files.
-            delete_csv_files(virt_directory)
+    
+    # Only use sigma = 0.01 for jitter
+    sigma = 0.1
+    
+    # Clear any previously generated CSV files
+    delete_csv_files(virt_directory)
+    
+    # Define custom virtual data generation with jitter
+    def custom_jitter_augmentation(train_data_dict):
+        def augment_and_save(data, u, labels, counter):
+            # Apply jitter to both wrists' data
+            left_data = data[:, :3].transpose()
+            right_data = data[:, 3:].transpose()
             
-            # Generate virtual data with the fixed sigma and current rounding precision.
-            csv_count = custom_virtual_data_generation_1(train_data_dict, 0, 0, fixed_sigma, round_digits)
+            left_aug = jitter(left_data, sigma=sigma)
+            right_aug = jitter(right_data, sigma=sigma)
             
-            # Include the CSV file count in the identifier passed to the evaluation.
-            eval_id = f"sigma_{fixed_sigma}_round_{round_digits}_{csv_count}_{i}"
-            f1 = HAR_evaluation(eval_id)
-            print(f"sigma: {fixed_sigma}, round_digits: {round_digits}, csv_count: {csv_count} -> f1 score: {f1}")
+            # Concatenate the augmented data
+            combined = np.concatenate([left_aug.transpose(), right_aug.transpose()], axis=1)
+            
+            # Combine with labels
+            virtual_data = np.concatenate([combined, labels], axis=1)
+            
+            # Convert to dataframe and save
+            df = pd.DataFrame(virtual_data, columns=new_columns)
+            df.to_csv(os.path.join(virt_directory, f"{u}_aug_{counter}.csv"), index=False)
+        
+        # Process each user's data
+        number = 0
+        for u, df in train_data_dict.items():
+            number += 1
+            print(f'Generating virtual data from user {u} with jitter sigma={sigma}')
+            
+            # Extract sensor data and labels
+            raw_data = df[selected_columns[:6]].values
+            labels = df[selected_columns[-1]].values.reshape(-1, 1)
+            
+            volume_checker = True
+            aug_count = 0
+            while volume_checker:
+                augment_and_save(raw_data, u, labels, aug_count)
+                aug_count += 1
+                volume_checker = check_virtual_volume(rootdir, virtpath, limit_mb=500*number/len(train_data_dict))
+    
+    # Generate virtual data with jitter
+    custom_jitter_augmentation(train_data_dict)
+    print(f'Virtual data generation completed with jitter sigma={sigma}')
+    
+    # Run evaluation
+    f1score = HAR_evaluation(f"jitter_sigma_{sigma}")
+    print(f"Jitter with sigma={sigma}, f1 score: {f1score}")

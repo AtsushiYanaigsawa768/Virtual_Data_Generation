@@ -15,7 +15,8 @@ from torch.autograd import Variable
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, confusion_matrix
+import seaborn as sns
 
 """
 Variable Part
@@ -471,6 +472,32 @@ def HAR_evaluation(model_name,virt_directory="/root/Virtual_Data_Generation/data
         f1 = f1_score(y_true, y_pred, average='macro')
 
         print(f'F1 Score of test set: {f1:.4f}')
+        
+        # 混同行列を作成
+        cm = confusion_matrix(y_true, y_pred)
+        
+        # ラベルの実際のID（操作ID）を取得（必要に応じて）
+        label_id_map = {v: k for k, v in label_dict.items()}
+        labels = [label_id_map.get(i, str(i)) for i in range(len(np.unique(y_true)))]
+        
+        # 混同行列を可視化
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=labels, yticklabels=labels)
+        plt.title(f'Confusion Matrix - {model_name}')
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
+        plt.tight_layout()
+        plt.savefig(f'/root/Virtual_Data_Generation/Results/{model_name}_confusion_matrix.png')
+        plt.savefig(f'/root/Virtual_Data_Generation/Results/{model_name}_confusion_matrix.eps', format='eps')
+        
+        # 詳細な予測結果を保存（オプション）
+        results_df = pd.DataFrame({
+            'True Label': [label_id_map.get(l, str(l)) for l in y_true],
+            'Predicted Label': [label_id_map.get(l, str(l)) for l in y_pred],
+            'Correct': y_true == y_pred
+        })
+        results_df.to_csv(f'/root/Virtual_Data_Generation/Results/{model_name}_prediction_results.csv', index=False)
+        
     plt.figure(figsize=(6,4))
     plt.plot(val_losses, label='valid loss')
     plt.plot(train_losses, label='train loss')
